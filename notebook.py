@@ -47,16 +47,21 @@ def split_train_test(paths: list[Path], train_ratio: float=0.7, seed_offset: int
     return (shuffled[:split_idx], shuffled[split_idx:])
 
 def load_image_np(path: Path) -> np.ndarray:
+    with Image.open(path) as image:
+        return np.asarray(image.convert('RGB'))
     raise NotImplementedError('Load one RGB image into a NumPy array.')
 
 def center_crop(image: np.ndarray, crop_size: int=48) -> np.ndarray:
-    raise NotImplementedError('Implement a centered crop with slicing.')
+    h, w = image.shape[:2]
+    start_row = (h - crop_size) // 2
+    start_col = (w - crop_size) // 2
+    return image[start_row:start_row + crop_size, start_col:start_col + crop_size]
 
 def flip_horizontal(image: np.ndarray) -> np.ndarray:
-    raise NotImplementedError('Flip the image horizontally with slicing.')
+    return image[:, ::-1]
 
 def normalize_01(image: np.ndarray) -> np.ndarray:
-    raise NotImplementedError('Normalize pixel values to [0, 1].')
+    return image.astype(np.float32) / 255
 
 def show_histograms(uint8_img, float_img):
     plt.figure(figsize=(10, 4))
@@ -70,16 +75,29 @@ def show_histograms(uint8_img, float_img):
     plt.show()
 
 def rgb_to_gray(image_float: np.ndarray) -> np.ndarray:
-    raise NotImplementedError('Convert RGB to grayscale.')
+    return 0.299 * image_float[:, :, 0] + 0.587 * image_float[:, :, 1] + 0.114 * image_float[:, :, 2]
 
 def channel_summary(image_float: np.ndarray) -> tuple[np.ndarray, int]:
-    raise NotImplementedError('Summarize the RGB channels with axis=(0, 1).')
+    channel_means = image_float.mean(axis=(0, 1))
+    brightest_index = np.argmax(channel_means)
+    return (channel_means, brightest_index)
 
 def convolve2d_matmul(image_gray: np.ndarray, kernel: np.ndarray) -> np.ndarray:
-    raise NotImplementedError('Apply a 2D filter with matrix multiplication.')
+    h, w = image_gray.shape
+    kernelh, kernelw = kernel.shape
+    out_h = h - kernelh + 1
+    out_w = w - kernelw + 1
+    output = np.zeros((out_h, out_w), dtype=np.float32)
+    for i in range(46):
+        for j in range(46):
+            patch = image_gray[i:i + 3, j:j + 3]
+            patch_flat = patch.flatten()
+            kernel_flat = kernel.flatten()
+            output[i, j] = patch_flat @ kernel_flat
+    return output
 
 def flatten_image(image: np.ndarray) -> np.ndarray:
-    raise NotImplementedError('Flatten the image into one vector.')
+    return image.flatten()
 FEATURE_NAMES = ['mean_r', 'mean_g', 'mean_b', 'std_r', 'std_g', 'std_b', 'brightest_channel', 'edge_mean', 'edge_std', 'row_std_mean']
 
 def extract_features(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
@@ -90,7 +108,18 @@ def extract_features(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     channel_stds = image_float.std(axis=(0, 1)).astype(np.float32)
     filtered = convolve2d_matmul(gray, kernel)
     row_std_profile = np.apply_along_axis(np.std, 1, gray)
-    raise NotImplementedError('Build one hand-crafted feature vector.')
+    return np.concatenate([channel_means, channel_stds, np.array([brightest_channel, filtered.mean(), filtered.std(), row_std_profile.mean()])]).astype(np.float32)
 
 def build_feature_matrix(paths: list[Path], kernel: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    raise NotImplementedError('Build the feature matrix for the dataset subset.')
+    image = load_image_np
+    features = []
+    labels = []
+    for path in paths:
+        image = load_image_np(path)
+        feature = extract_features(image, kernel)
+        label = LABEL_TO_INDEX[label_from_path(path)]
+        features.append(feature)
+        labels.append(label)
+    X = np.stack(features)
+    y = np.array(labels)
+    return (X, y)
